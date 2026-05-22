@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <key>Label</key>
+  <string>com.privacy_tool.bridge_refresh</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>0</integer>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>HIDE_VENV_PYTHON</string>
+    <string>HIDE_TOOL_DIR/core/bridge_rotation.py</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>HIDE_USER_HOME</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>HIDE_LOG_DIR/bridge_refresh.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>HIDE_LOG_DIR/bridge_refresh.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+</dict>
+</plist>

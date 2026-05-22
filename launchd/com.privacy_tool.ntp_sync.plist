@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <key>Label</key>
+  <string>com.privacy_tool.ntp_sync</string>
+
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>HIDE_VENV_PYTHON</string>
+    <string>HIDE_TOOL_DIR/privacy/ntp_over_tor.py</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>HIDE_USER_HOME</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>HIDE_LOG_DIR/ntp_sync.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>HIDE_LOG_DIR/ntp_sync.log</string>
+
+  <key>ThrottleInterval</key>
+  <integer>300</integer>
+
+</dict>
+</plist>

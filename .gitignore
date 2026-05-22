@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Runtime / data
+tor_data/
+*.log
+hide.pid
+original_timezone.txt
+integrity_manifest.json
+private_browser_profiles/
+
+# Secrets / auth
+control_auth_cookie
+*.authcookie
+
+# Distribution
+dist/
+build/
+*.egg-info/

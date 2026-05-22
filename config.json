@@ -1,0 +1,85 @@
+{
+  "_comment": "privacy_tool central configuration — edit here, never in individual scripts",
+
+  "tor": {
+    "socks_host": "127.0.0.1",
+    "socks_port": 9050,
+    "socks_port_browser": 9150,
+    "socks_port_apps": 9250,
+    "control_host": "127.0.0.1",
+    "control_port": 9051,
+    "dns_port": 5300,
+    "bootstrap_timeout_s": 300,
+    "bootstrap_poll_s": 2,
+    "newnym_cooldown_s": 15,
+    "circuit_renewal_interval_s": 600,
+    "num_entry_guards": 3,
+    "max_circuit_dirtiness_s": 600,
+    "exit_nodes": "",
+    "exclude_exit_nodes": "{ru},{cn},{ir},{kp},{sy}"
+  },
+
+  "killswitch": {
+    "poll_interval_s": 3,
+    "socks_probe_timeout_s": 2,
+    "pf_anchor": "com.privacy_tool.killswitch"
+  },
+
+  "traffic_padding": {
+    "min_interval_s": 45,
+    "max_interval_s": 180,
+    "min_burst": 1,
+    "max_burst": 3,
+    "request_timeout_s": 10,
+    "targets": [
+      "https://www.torproject.org/",
+      "https://www.eff.org/",
+      "https://www.privacyguides.org/",
+      "https://duckduckgo.com/",
+      "https://proton.me/"
+    ]
+  },
+
+  "log_purge": {
+    "max_age_hours": 24,
+    "tor_descriptor_max_age_hours": 48,
+    "max_file_size_bytes": 1048576,
+    "overwrite_passes": 3
+  },
+
+  "dns": {
+    "pf_anchor": "com.privacy_tool.dns",
+    "resolver_file": "/etc/resolver/privacy_tool_dns"
+  },
+
+  "ntp": {
+    "sync_sources": [
+      "www.cloudflare.com",
+      "www.google.com",
+      "duckduckgo.com",
+      "www.torproject.org"
+    ],
+    "timeout_s": 15,
+    "pf_anchor": "com.privacy_tool.ntp"
+  },
+
+  "bridge_rotation": {
+    "moat_url": "https://bridges.torproject.org/moat/circumvention/builtin",
+    "request_timeout_s": 15
+  },
+
+  "integrity": {
+    "watched_extensions": [".py", ".plist", ".sh"],
+    "excluded_files": [
+      "integrity_manifest.json",
+      "__pycache__"
+    ]
+  },
+
+  "security": {
+    "sip_check_halt_on_disabled": false,
+    "swap_check_warn_only": true,
+    "force_utc_timezone": true,
+    "secure_delete_passes": 3
+  }
+}
