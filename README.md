@@ -27,6 +27,16 @@ Some protections are best-effort. For example, MAC randomization can fail on som
 
 ## Install
 
+### First, Install Git
+
+If `git` is not already installed, install it first:
+
+- Windows: download Git from [git-scm.com/download/win](https://git-scm.com/download/win)
+- macOS: install the Xcode command line tools by running `xcode-select --install`, or download Git from [git-scm.com/download/mac](https://git-scm.com/download/mac)
+- Linux: install Git with your package manager, such as `sudo apt install git`, `sudo dnf install git`, or `sudo pacman -S git`
+
+After Git is installed, open a new terminal and run the commands below.
+
 ### macOS and Linux
 
 Open Terminal:
@@ -48,7 +58,7 @@ cd Hide
 .\install.bat
 ```
 
-If you do not have Git, download the ZIP from GitHub, extract it, then right-click `install.bat` and choose **Run as administrator**.
+If you do not want to use Git, download the ZIP from GitHub, extract it, then right-click `install.bat` and choose **Run as administrator**.
 
 ## Run
 
