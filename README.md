@@ -32,8 +32,8 @@ Some protections are best-effort. For example, MAC randomization can fail on som
 Open Terminal:
 
 ```bash
-curl -fsSL https://github.com/plastral/Hide/archive/refs/heads/main.tar.gz | tar -xz
-cd Hide-main
+git clone https://github.com/plastral/Hide.git
+cd Hide
 chmod +x bootstrap.sh
 sudo ./bootstrap.sh
 ```
