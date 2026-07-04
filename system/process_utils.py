@@ -1,4 +1,4 @@
-                      
+
 
 import ctypes
 import ctypes.util
@@ -15,7 +15,7 @@ if sys.platform != 'win32':
 
 APP_SUPPORT = app_support_dir()
 
-_TOOL_DIR = Path(__file__).parent.parent                
+_TOOL_DIR = Path(__file__).parent.parent
 _VENV_DIR = _TOOL_DIR / ".venv"
 
 def ensure_venv_with_setproctitle() -> str:
@@ -37,7 +37,7 @@ def ensure_venv_with_setproctitle() -> str:
 
 def _ensure_setproctitle() -> bool:
     try:
-        import setproctitle              
+        import setproctitle
         return True
     except ImportError:
         return False
@@ -48,7 +48,7 @@ def set_process_name(name: str) -> None:
         _ensure_setproctitle()
         import setproctitle
         setproctitle.setproctitle(name)
-        return                                                            
+        return
     except Exception:
         pass
 
@@ -85,7 +85,8 @@ class InstanceLock:
         self._fh = None
 
     def __enter__(self) -> "InstanceLock":
-        self._fh = open(self._path, "w")
+        self._fh = open(self._path, "a+")
+        self._fh.seek(0)
         try:
             if sys.platform == 'win32':
                 import msvcrt
@@ -103,6 +104,8 @@ class InstanceLock:
                 sys.exit(0)
             raise
 
+        self._fh.seek(0)
+        self._fh.truncate()
         self._fh.write(str(os.getpid()))
         self._fh.flush()
         return self
@@ -112,6 +115,10 @@ class InstanceLock:
             if sys.platform == 'win32':
                 import msvcrt
                 try:
+                    # msvcrt.locking() operates at the current file position, and
+                    # writing the PID above advanced it. Seek back to byte 0 so we
+                    # release the same byte we locked in __enter__.
+                    self._fh.seek(0)
                     msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
                 except OSError:
                     pass

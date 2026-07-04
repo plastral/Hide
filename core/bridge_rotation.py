@@ -1,4 +1,4 @@
-                      
+
 
 import json
 import logging
@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-import _path              
+import _path
 import tor_setup
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ FALLBACK_BRIDGES: list[str] = [
     "obfs4 192.95.36.142:443 CDF2E852BF539B82BD10E27E9115A31734E378C2 cert=qUVQ0srL1JI/vO6V6m/24anYXiJD3zP8bsEFyuh1qtUZktAjpQ/tsN4tKS9LE4SZVRuC4A iat-mode=0",
     "obfs4 38.229.1.78:80 C8CBDB2464FC9804A69531437BCF2BE31FDD2EE4 cert=Hmyfd2ev46gGY7NoVxkptipdzFQSY40w8zXABqLOzv1y9XL3/psggNvc90wh/09yBZA iat-mode=0",
     "obfs4 38.229.33.83:80 0BAC39417268B96B9F514E7F63FA6FBA1A788955 cert=VwEFpk9F/UN9JED7XpG1XOjm/O8KCXK2Roufz/omuuMwcCsp56gKU1mCYCfMDDfm8g iat-mode=0",
-]                                    
+]
 
 def fetch_bridges_from_moat() -> list[str]:
     payload = json.dumps({"transport": "obfs4"}).encode()

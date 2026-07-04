@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -7,7 +7,11 @@ import subprocess
 import sys
 
 import _path
-from platform_utils import randomize_hostname as _platform_randomize_hostname
+from platform_utils import (
+    IS_MACOS,
+    is_admin,
+    randomize_hostname as _platform_randomize_hostname,
+)
 
 log = logging.getLogger(__name__)
 
@@ -38,12 +42,16 @@ def _random_hostname() -> str:
     return f"{adj}-{noun}-{suffix}"
 
 def require_root() -> None:
-    if os.geteuid() != 0:
-        log.error("hostname_randomize.py requires root.")
+    if not is_admin():
+        log.error("hostname_randomize.py requires elevated privileges.")
+        if sys.platform == "win32":
+            sys.exit(1)
         os.execvp("sudo", ["sudo", sys.executable, __file__] + sys.argv[1:])
         sys.exit(1)
 
 def current_names() -> dict[str, str]:
+    if not IS_MACOS:
+        return {}
     names: dict[str, str] = {}
     for key in ("ComputerName", "HostName", "LocalHostName"):
         result = subprocess.run(
@@ -54,8 +62,8 @@ def current_names() -> dict[str, str]:
     return names
 
 def randomize() -> str:
-    if os.geteuid() != 0:
-        log.debug("Hostname randomization skipped: not root.")
+    if not is_admin():
+        log.debug("Hostname randomization skipped: not elevated.")
         return ""
     new_name = _platform_randomize_hostname()
     log.info("Hostname randomized → %s", new_name)

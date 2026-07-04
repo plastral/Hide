@@ -1,4 +1,4 @@
-                      
+
 
 import argparse
 import logging
@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import _path
-from platform_utils import app_support_dir, firewall_block, firewall_pass
+from platform_utils import app_support_dir, firewall_block, firewall_pass, is_admin
 
 POLL_INTERVAL_S = 3
 
@@ -36,13 +36,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 def require_root() -> None:
-    if sys.platform == "win32":
-        import ctypes
-        if not ctypes.windll.shell32.IsUserAnAdmin():
-            log.error("killswitch.py must be run as Administrator.")
-            sys.exit(1)
-    elif os.geteuid() != 0:
-        log.error("killswitch.py must be run as root (sudo).")
+    if not is_admin():
+        log.error("killswitch.py must be run with elevated privileges.")
         sys.exit(1)
 
 def activate_killswitch() -> None:

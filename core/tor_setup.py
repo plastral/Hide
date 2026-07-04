@@ -1,4 +1,4 @@
-                      
+
 
 import os
 import shutil
@@ -13,7 +13,7 @@ OBFS4_BRIDGES: list[str] = [
 ]
 
 import _path
-from platform_utils import app_support_dir
+from platform_utils import IS_MACOS, app_support_dir, install_package
 APP_SUPPORT  = app_support_dir()
 TOR_DATA_DIR = APP_SUPPORT / "tor_data"
 TORRC_PATH   = APP_SUPPORT / "torrc"
@@ -21,7 +21,7 @@ LOG_PATH     = APP_SUPPORT / "tor.log"
 
 def _load_cfg() -> dict:
     try:
-        import _path              
+        import _path
         from config_loader import CFG
         return CFG
     except Exception:
@@ -77,8 +77,8 @@ def write_torrc() -> None:
     cfg     = _load_cfg()
     tor_cfg = cfg.get("tor", {})
 
-    exit_nodes         = tor_cfg.get("exit_nodes", "")                                 
-    exclude_exit_nodes = tor_cfg.get("exclude_exit_nodes", "")                    
+    exit_nodes         = tor_cfg.get("exit_nodes", "")
+    exclude_exit_nodes = tor_cfg.get("exclude_exit_nodes", "")
 
     num_entry_guards      = tor_cfg.get("num_entry_guards", 3)
     max_circuit_dirtiness = tor_cfg.get("max_circuit_dirtiness_s", 600)
@@ -101,7 +101,14 @@ def write_torrc() -> None:
         "GuardLifetime 3 months",
     ]
 
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        # Windows has no pf/iptables to redirect :53 -> :5300, so Tor must
+        # listen on the standard DNS port directly. Adapters are then pointed
+        # at 127.0.0.1 (see platform_utils._windows_dns_redirect). Without this
+        # the DNS redirect would send every lookup to a port nothing answers on,
+        # breaking all name resolution on the machine.
+        lines += ["DNSPort 127.0.0.1:53", "AutomapHostsOnResolve 1"]
+    else:
         lines += ["DNSPort 5300", "AutomapHostsOnResolve 1"]
 
     if exit_nodes:
@@ -156,13 +163,12 @@ def start_tor() -> subprocess.Popen:
     return proc
 
 def setup() -> None:
-    if not brew_installed():
+    if IS_MACOS and not brew_installed():
         install_brew()
-    brew_install("tor")
-    brew_install("obfs4proxy")
+    install_package("tor", "tor")
+    install_package("obfs4proxy", "obfs4proxy")
     write_torrc()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     setup()
-    start_tor()

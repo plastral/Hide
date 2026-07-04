@@ -1,4 +1,4 @@
-                      
+
 
 import os
 import re
@@ -11,6 +11,7 @@ from typing import Optional
 import _path
 from platform_utils import (
     get_active_interfaces as _platform_get_active_interfaces,
+    is_admin,
     randomize_mac as _platform_randomize_mac,
     IS_MACOS,
 )
@@ -18,7 +19,10 @@ from platform_utils import (
 log = logging.getLogger(__name__)
 
 def require_root() -> None:
-    if os.geteuid() != 0:
+    if not is_admin():
+        if sys.platform == "win32":
+            log.error("mac_randomize.py requires Administrator.")
+            sys.exit(1)
         args = ["sudo", sys.executable, __file__] + sys.argv[1:]
         os.execvp("sudo", args)
         sys.exit(1)
@@ -106,8 +110,8 @@ def set_mac(interface: str, mac: str) -> bool:
         return False
 
 def randomize_all() -> tuple[int, int]:
-    if os.geteuid() != 0:
-        log.debug("MAC randomization skipped: not root.")
+    if not is_admin():
+        log.debug("MAC randomization skipped: not elevated.")
         return 0, 0
     interfaces = get_active_interfaces()
     ok_count = skipped = 0

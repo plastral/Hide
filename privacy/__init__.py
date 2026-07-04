@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-import _path              
+import _path
 
 from privacy.mac_randomize      import randomize_all as randomize_mac
 from privacy.hostname_randomize import randomize as randomize_hostname

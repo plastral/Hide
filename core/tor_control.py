@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -34,7 +34,7 @@ class TorControl:
         self._sock = socket.create_connection(
             (CONTROL_HOST, CONTROL_PORT), timeout=CONNECT_TIMEOUT_S
         )
-        self._sock.settimeout(None)                                    
+        self._sock.settimeout(None)
         log.debug("Connected to Tor control port.")
 
     def close(self) -> None:
@@ -67,7 +67,7 @@ class TorControl:
 
             if len(line) >= 4 and line[3] == " ":
                 break
-            if line.startswith("6"):                              
+            if line.startswith("6"):
                 break
         return lines
 

@@ -1,4 +1,4 @@
-                      
+
 
 import argparse
 import hashlib
@@ -21,7 +21,7 @@ _WATCHED_EXTS    = set(CFG["integrity"]["watched_extensions"])
 _EXCLUDED_FILES  = set(CFG["integrity"]["excluded_files"])
 
 _RUNTIME_EXCLUDED = {
-    "config.json",                                           
+    "config.json",
     "integrity_manifest.json",
 }
 

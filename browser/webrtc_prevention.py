@@ -1,4 +1,4 @@
-                      
+
 
 import json
 import logging
@@ -6,11 +6,11 @@ import shutil
 from pathlib import Path
 
 import _path
-from platform_utils import IS_MACOS, IS_LINUX, IS_WINDOWS
+from platform_utils import IS_MACOS, IS_LINUX, IS_WINDOWS, user_home
 
 log = logging.getLogger(__name__)
 
-HOME = Path.home()
+HOME = user_home()
 
 FIREFOX_USER_JS = """
 
@@ -106,7 +106,10 @@ if IS_MACOS:
     CHROMIUM_POLICY_PATHS = {
         "Chrome":   HOME / "Library" / "Application Support" / "Google" / "Chrome" / "policies" / "managed",
         "Chromium": HOME / "Library" / "Application Support" / "Chromium" / "policies" / "managed",
-        "Brave":    HOME / "Library" / "Application Support" / "BraveSoftware" / "Brave-Browser" / "policies" / "managed",
+        "Brave": (
+            HOME / "Library" / "Application Support" / "BraveSoftware"
+            / "Brave-Browser" / "policies" / "managed"
+        ),
     }
 elif IS_LINUX:
     CHROMIUM_POLICY_PATHS = {
@@ -121,7 +124,56 @@ elif IS_WINDOWS:
         "Brave":    Path(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\policies\managed"),
     }
 
+# Chromium-family browsers on Windows read managed policies from the registry
+# (HKLM\SOFTWARE\Policies\...), NOT from JSON files on disk. Writing JSON there
+# is silently ignored, so Windows needs a dedicated registry path.
+_WINDOWS_POLICY_KEYS: dict[str, str] = {
+    "Chrome":   r"SOFTWARE\Policies\Google\Chrome",
+    "Chromium": r"SOFTWARE\Policies\Chromium",
+    "Brave":    r"SOFTWARE\Policies\BraveSoftware\Brave",
+}
+
+def _apply_chromium_windows_registry() -> int:
+    import winreg
+    written = 0
+    for name, subkey in _WINDOWS_POLICY_KEYS.items():
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, subkey, 0,
+                                    winreg.KEY_WRITE) as key:
+                for pref, value in CHROMIUM_POLICY.items():
+                    data = value if isinstance(value, str) else json.dumps(value)
+                    winreg.SetValueEx(key, pref, 0, winreg.REG_SZ, data)
+            log.info("%s managed policy written to registry: HKLM\\%s", name, subkey)
+            written += 1
+        except PermissionError:
+            log.warning("%s policy needs Administrator to write registry — skipped.", name)
+        except OSError as exc:
+            log.debug("%s registry policy skipped: %s", name, exc)
+    return written
+
+def remove_chromium_windows_registry() -> None:
+    import winreg
+    for name, subkey in _WINDOWS_POLICY_KEYS.items():
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey, 0,
+                                winreg.KEY_WRITE) as key:
+                for pref in CHROMIUM_POLICY:
+                    try:
+                        winreg.DeleteValue(key, pref)
+                    except FileNotFoundError:
+                        pass
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.debug("%s registry policy cleanup skipped: %s", name, exc)
+
 def apply_chromium_family() -> int:
+    if IS_WINDOWS:
+        written = _apply_chromium_windows_registry()
+        if written == 0:
+            log.info("No Chromium-family policies could be written — skipping.")
+        return written
+
     written = 0
     for name, policy_dir in CHROMIUM_POLICY_PATHS.items():
         app_dir = policy_dir.parent.parent

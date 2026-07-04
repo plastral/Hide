@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))                
-import _path                                            
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import _path
 
 from core.tor_setup      import write_torrc, setup, start_tor
 from core.tor_bootstrap  import wait_for_bootstrap

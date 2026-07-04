@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import logging.handlers
@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-sys.path.insert(0, str(Path(__file__).parent.parent))                
-import _path                                   
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import _path
 
 from config_loader import CFG
 from process_utils import set_process_name, InstanceLock
@@ -36,12 +36,12 @@ import sip_check
 import swap_check
 import timezone_utc
 
-from platform_utils import app_support_dir
+from platform_utils import app_support_dir, is_admin, real_uid_gid
 APP_SUPPORT = app_support_dir()
 APP_SUPPORT.mkdir(parents=True, exist_ok=True)
 
 LOG_MAX_BYTES = CFG["log_purge"]["max_file_size_bytes"]
-LOG_BACKUP_COUNT = 2                          
+LOG_BACKUP_COUNT = 2
 
 def _setup_logging() -> None:
     main_log = APP_SUPPORT / "main.log"
@@ -64,20 +64,9 @@ _setup_logging()
 log = logging.getLogger(__name__)
 
 def require_root() -> None:
-    if sys.platform == "win32":
-        import ctypes
-        if not ctypes.windll.shell32.IsUserAnAdmin():
-            log.error("main.py must run as Administrator.")
-            sys.exit(1)
-    elif os.geteuid() != 0:
-        log.error("main.py must run as root.")
+    if not is_admin():
+        log.error("main.py must run with elevated privileges.")
         sys.exit(1)
-
-def real_uid_gid() -> tuple[int, int]:
-    return (
-        int(os.environ.get("SUDO_UID", os.getuid())),
-        int(os.environ.get("SUDO_GID", os.getgid())),
-    )
 
 def _step(n: int, label: str) -> None:
     log.info("=" * 50)
@@ -95,7 +84,7 @@ def _log_rotation_watchdog() -> None:
                     log.info("Rotated %s (was %d bytes).", log_file.name, len(content))
         except Exception as exc:
             log.debug("Log rotation watchdog error: %s", exc)
-        time.sleep(300)                         
+        time.sleep(300)
 
 _watched_threads: list[tuple[str, callable]] = []
 
@@ -206,10 +195,16 @@ def main() -> None:
 
     _step(12, "Starting Tor")
     torrc = APP_SUPPORT / "torrc"
+    try:
+        tor_bin = tor_setup._find_tor_bin()
+    except FileNotFoundError:
+        tor_bin = "tor"
     popen_kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        popen_kwargs["cwd"] = str(Path(tor_bin).parent)
+    else:
         popen_kwargs["preexec_fn"] = lambda: (os.setgid(gid), os.setuid(uid))
-    tor_proc = subprocess.Popen(["tor", "-f", str(torrc)], **popen_kwargs)
+    tor_proc = subprocess.Popen([tor_bin, "-f", str(torrc)], **popen_kwargs)
     log.info("Tor PID: %d", tor_proc.pid)
 
     _step(13, "Waiting for Tor bootstrap")

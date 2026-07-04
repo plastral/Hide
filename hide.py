@@ -1,4 +1,4 @@
-                      
+
 
 import json
 import logging
@@ -24,12 +24,13 @@ TOOL_DIR    = Path(__file__).parent
 sys.path.insert(0, str(TOOL_DIR))
 import _path
 from process_utils import set_process_name, InstanceLock
-from platform_utils import app_support_dir
+from platform_utils import app_support_dir, real_uid_gid, user_home
 APP_SUPPORT = app_support_dir()
+USER_HOME = user_home()
 
 set_process_name("HIDE")
 DAEMON_DIR  = Path("/Library/LaunchDaemons")
-AGENT_DIR   = Path.home() / "Library" / "LaunchAgents"
+AGENT_DIR   = USER_HOME / "Library" / "LaunchAgents"
 
 LAUNCHD_DIR  = TOOL_DIR / "launchd"
 ROOT_PLISTS  = ["com.privacy_tool.killswitch.plist", "com.privacy_tool.ntp_sync.plist"]
@@ -51,7 +52,7 @@ def _c(code: str, text: str) -> str:
 
 def bold(t):    return _c("1",     t)
 def dim(t):     return _c("2",     t)
-def white(t):   return _c("97",    t)                                  
+def white(t):   return _c("97",    t)
 def green(t):   return _c("92",    t)
 def red(t):     return _c("91",    t)
 def yellow(t):  return _c("93",    t)
@@ -72,9 +73,9 @@ BANNER = r"""
 
 def print_banner(clear: bool = True) -> None:
     if clear:
-        os.system("clear")
+        os.system("cls" if sys.platform == "win32" else "clear")
     print(bold(white(BANNER)))
-    print(f"  {grey('made by plantiral with love')}")
+    print(f"  {grey('made by plastral')}")
     print(f"  {grey('─' * 44)}")
     print()
 
@@ -84,7 +85,7 @@ class Spinner:
 
     def __init__(self, label: str, sudo: bool = False):
         self._label   = label
-        self._sudo    = sudo                                                            
+        self._sudo    = sudo
         self._stop    = threading.Event()
         self._thread  = threading.Thread(target=self._spin, daemon=True)
         self._success: Optional[bool] = None
@@ -154,17 +155,27 @@ class SystemInfo:
         self.homebrew    = self._find_brew() if IS_MACOS else None
         self.brew_bin    = str(Path(self.homebrew).parent) if self.homebrew else ""
         self.python3     = self._find_python3()
-        self.tor         = shutil.which("tor") or shutil.which("tor.exe") or self._brew_path("tor") or self._win_tor_path("tor.exe")
-        self.obfs4proxy  = shutil.which("obfs4proxy") or shutil.which("obfs4proxy.exe") or self._brew_path("obfs4proxy") or self._win_tor_path("obfs4proxy.exe") or self._win_tor_path("lyrebird.exe")
+        self.tor = (
+            shutil.which("tor")
+            or shutil.which("tor.exe")
+            or self._brew_path("tor")
+            or self._win_tor_path("tor.exe")
+        )
+        self.obfs4proxy = (
+            shutil.which("obfs4proxy")
+            or shutil.which("obfs4proxy.exe")
+            or self._brew_path("obfs4proxy")
+            or self._win_tor_path("obfs4proxy.exe")
+            or self._win_tor_path("lyrebird.exe")
+        )
         self.browsers    = self._detect_browsers()
-        self.uid         = os.getuid() if not IS_WINDOWS else 0
-        self.gid         = os.getgid() if not IS_WINDOWS else 0
+        self.uid, self.gid = real_uid_gid()
         self.use_bootstrap = IS_MACOS and self.macos_major >= 13
 
     def _find_brew(self) -> Optional[str]:
         for candidate in [
-            "/opt/homebrew/bin/brew",                  
-            "/usr/local/bin/brew",             
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew",
         ]:
             if os.path.isfile(candidate):
                 return candidate
@@ -240,12 +251,23 @@ class SystemInfo:
             info(f"Package mgr   {bold(_linux_pkg_manager() or yellow('none detected'))}")
         elif self.is_windows:
             from platform_utils import _win_pkg_manager
-            info(f"Package mgr   {bold(_win_pkg_manager() or yellow('winget/choco not found — will download directly'))}")
+            pkg = _win_pkg_manager() or yellow("winget/choco not found — will download directly")
+            info(f"Package mgr   {bold(pkg)}")
         info(f"Tor           {bold(self.tor or yellow('not installed'))}")
         info(f"obfs4proxy    {bold(self.obfs4proxy or yellow('not installed'))}")
         info(f"Browsers      {bold(', '.join(self.browsers) or grey('none detected'))}")
 
 SI = SystemInfo()
+
+def _owner_spec(uid: int, gid: int) -> str:
+    try:
+        import grp
+        import pwd
+        user = pwd.getpwuid(uid).pw_name
+        group = grp.getgrgid(gid).gr_name
+        return f"{user}:{group}"
+    except Exception:
+        return str(uid)
 
 def _run(cmd: list[str], uid: int = None, gid: int = None,
          capture: bool = True) -> subprocess.CompletedProcess:
@@ -300,7 +322,7 @@ def _launchctl_load(plist_path: Path, system: bool = True) -> None:
         if r.returncode != 0:
             already = "already" in (r.stderr + r.stdout).lower()
             if already:
-                return                                  
+                return
 
             r2 = subprocess.run(
                 ["sudo", "launchctl", "load", "-w", str(plist_path)],
@@ -395,12 +417,15 @@ def _patch_plist_uid(src: Path, dst: Path) -> None:
         content,
     )
 
-    venv_python_path = (TOOL_DIR / ".venv" / "Scripts" / "python.exe") if sys.platform == "win32" else (TOOL_DIR / ".venv" / "bin" / "python3")
+    if sys.platform == "win32":
+        venv_python_path = TOOL_DIR / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python_path = TOOL_DIR / ".venv" / "bin" / "python3"
     resolved_python = str(venv_python_path) if venv_python_path.exists() else SI.python3
 
     content = content.replace("HIDE_VENV_PYTHON", resolved_python)
     content = content.replace("HIDE_TOOL_DIR", str(TOOL_DIR))
-    content = content.replace("HIDE_USER_HOME", str(Path.home()))
+    content = content.replace("HIDE_USER_HOME", str(USER_HOME))
     content = content.replace("HIDE_LOG_DIR", str(APP_SUPPORT))
     content = content.replace("HIDE_UID", str(SI.uid))
     content = content.replace("HIDE_GID", str(SI.gid))
@@ -566,11 +591,13 @@ def self_test() -> bool:
             warn("Kill-switch iptables rules not detected")
 
     try:
-        blocked = Path("/etc/hosts").read_text().find("privacy_tool telemetry block") != -1
+        from platform_utils import hosts_file
+        hf = hosts_file()
+        blocked = "privacy_tool telemetry block" in hf.read_text(errors="replace")
         if blocked:
-            ok("Telemetry block active  (/etc/hosts)")
+            ok(f"Telemetry block active  ({hf})")
         else:
-            warn("Telemetry /etc/hosts block not found")
+            warn("Telemetry hosts-file block not found")
     except OSError:
         pass
 
@@ -693,7 +720,6 @@ class RollbackManager:
                                "com.privacy_tool.telemetry", "com.privacy_tool.ntp"]:
                     subprocess.run(["sudo", "pfctl", "-a", anchor, "-F", "all"],
                                    capture_output=True, timeout=5)
-                subprocess.run(["sudo", "pfctl", "-d"], capture_output=True, timeout=5)
                 for iface in ["en0", "en1"]:
                     subprocess.run(["networksetup", "-setairportpower", iface, "on"],
                                    capture_output=True, timeout=5)
@@ -702,7 +728,9 @@ class RollbackManager:
                 pass
         elif SI.is_windows:
             try:
-                for rule in ["HIDE_block_out", "HIDE_block_in", "HIDE_block_dns", "HIDE_block_ntp"]:
+                for rule in ["HIDE_block_out", "HIDE_block_in", "HIDE_block_dns",
+                             "HIDE_block_dns_udp", "HIDE_block_dns_tcp",
+                             "HIDE_block_ntp", "HIDE_block_ipv6"]:
                     subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule",
                                     f"name={rule}"], capture_output=True, timeout=5)
             except Exception:
@@ -715,7 +743,7 @@ class RollbackManager:
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         if exc_type is not None:
             self.rollback()
-            return True                                           
+            return True
         return False
 
 def _live_bootstrap_wait(timeout_s: int = 360, tor_proc=None) -> bool:
@@ -774,7 +802,13 @@ def _live_bootstrap_wait(timeout_s: int = 360, tor_proc=None) -> bool:
 
         if last_pct == last_drawn and _TTY:
             elapsed = int(time.monotonic() - start_time)
-            sys.stdout.write(f"\r\033[K  {bold(white(f'{last_pct:>3}%'))}  {white('█' * int(last_pct / 5))}{grey('░' * (20 - int(last_pct / 5)))}  {grey('Connecting...')}  {grey(f'{elapsed}s')}")
+            bar_fill = int(last_pct / 5)
+            line = (
+                f"\r\033[K  {bold(white(f'{last_pct:>3}%'))}  "
+                f"{white('█' * bar_fill)}{grey('░' * (20 - bar_fill))}  "
+                f"{grey('Connecting...')}  {grey(f'{elapsed}s')}"
+            )
+            sys.stdout.write(line)
             sys.stdout.flush()
 
         if tor_proc is not None and tor_proc.poll() is not None:
@@ -858,14 +892,13 @@ def cmd_install() -> None:
         section("Directory Setup")
         with Spinner("Creating application support directory"):
             APP_SUPPORT.mkdir(parents=True, exist_ok=True)
-            AGENT_DIR.mkdir(parents=True, exist_ok=True)
+            if SI.is_macos:
+                AGENT_DIR.mkdir(parents=True, exist_ok=True)
 
             if not SI.is_windows:
                 try:
-                    import pwd as _pwd
-                    _owner = _pwd.getpwuid(os.getuid()).pw_name
                     subprocess.run(
-                        ["sudo", "chown", "-R", f"{_owner}:staff", str(APP_SUPPORT)],
+                        ["sudo", "chown", "-R", _owner_spec(SI.uid, SI.gid), str(APP_SUPPORT)],
                         capture_output=True,
                     )
                 except Exception:
@@ -958,10 +991,10 @@ def cmd_install() -> None:
         elif SI.is_linux:
           info("Installing systemd services")
           linux_services = [
-              ("hide-killswitch",    "HIDE Network Kill-Switch",          str(TOOL_DIR / "core" / "main.py")),
-              ("hide-bridge-refresh","HIDE Bridge Rotation",              str(TOOL_DIR / "core" / "bridge_rotation.py")),
-              ("hide-ntp-sync",      "HIDE NTP Sync over Tor",            str(TOOL_DIR / "privacy" / "ntp_over_tor.py")),
-              ("hide-log-purge",     "HIDE Secure Log Purge",             str(TOOL_DIR / "system" / "log_purge.py")),
+              ("hide-killswitch", "HIDE Network Kill-Switch", str(TOOL_DIR / "core" / "main.py")),
+              ("hide-bridge-refresh", "HIDE Bridge Rotation", str(TOOL_DIR / "core" / "bridge_rotation.py")),
+              ("hide-ntp-sync", "HIDE NTP Sync over Tor", str(TOOL_DIR / "privacy" / "ntp_over_tor.py")),
+              ("hide-log-purge", "HIDE Secure Log Purge", str(TOOL_DIR / "system" / "log_purge.py")),
           ]
           for svc_name, svc_desc, svc_script in linux_services:
               with Spinner(f"Installing {svc_name}.service", sudo=True):
@@ -971,10 +1004,10 @@ def cmd_install() -> None:
         elif SI.is_windows:
           info("Registering Task Scheduler entries")
           windows_services = [
-              ("hide-killswitch",    "HIDE Network Kill-Switch",          str(TOOL_DIR / "core" / "main.py")),
-              ("hide-bridge-refresh","HIDE Bridge Rotation",              str(TOOL_DIR / "core" / "bridge_rotation.py")),
-              ("hide-ntp-sync",      "HIDE NTP Sync over Tor",            str(TOOL_DIR / "privacy" / "ntp_over_tor.py")),
-              ("hide-log-purge",     "HIDE Secure Log Purge",             str(TOOL_DIR / "system" / "log_purge.py")),
+              ("hide-killswitch", "HIDE Network Kill-Switch", str(TOOL_DIR / "core" / "main.py")),
+              ("hide-bridge-refresh", "HIDE Bridge Rotation", str(TOOL_DIR / "core" / "bridge_rotation.py")),
+              ("hide-ntp-sync", "HIDE NTP Sync over Tor", str(TOOL_DIR / "privacy" / "ntp_over_tor.py")),
+              ("hide-log-purge", "HIDE Secure Log Purge", str(TOOL_DIR / "system" / "log_purge.py")),
           ]
           for svc_name, svc_desc, svc_script in windows_services:
               with Spinner(f"Registering {svc_name} task"):
@@ -1085,9 +1118,7 @@ def cmd_install() -> None:
         with Spinner("DNS leak prevention"):
             import dns_leak_prevention
             dns_leak_prevention.activate()
-        if SI.is_macos:
-            _rb.register("Flush DNS pfctl anchor",
-                         lambda: subprocess.run(["sudo","pfctl","-a","com.privacy_tool.dns","-F","all"], capture_output=True))
+        _rb.register("Restore DNS resolver settings", dns_leak_prevention.deactivate)
         process_line("dns", "DNS redirected through Tor")
 
         with Spinner("Blocking telemetry domains (/etc/hosts)"):
@@ -1133,13 +1164,20 @@ def cmd_install() -> None:
             else:
                 s.note("skipped (sudo unavailable)")
 
-        with Spinner("Syncing clock via Tor (disabling Apple NTP)"):
+        with Spinner("Forcing timezone to UTC"):
+            import timezone_utc
+            timezone_utc.activate()
+        _rb.register("Restore original timezone", timezone_utc.deactivate)
+        ok("System timezone set to UTC — timezone fingerprinting blocked")
+
+        with Spinner("Syncing clock via Tor (disabling system NTP)"):
             import ntp_over_tor
             ntp_over_tor.activate()
-        _rb.register("Re-enable Apple NTP",
-                     lambda: subprocess.run(["sudo","launchctl","load","-w",
-                         "/System/Library/LaunchDaemons/com.apple.timed.plist"], capture_output=True))
-        ok("Clock synced via HTTP-over-Tor, Apple NTP blocked")
+        if SI.is_macos:
+            _rb.register("Re-enable Apple NTP",
+                         lambda: subprocess.run(["sudo","launchctl","load","-w",
+                             "/System/Library/LaunchDaemons/com.apple.timed.plist"], capture_output=True))
+        ok("Clock synced via HTTP-over-Tor, system NTP blocked")
 
         with Spinner("Starting traffic padding thread"):
             import traffic_padding
@@ -1156,27 +1194,22 @@ def cmd_install() -> None:
             circuit_renewal.start()
         process_line("thread:circuit-renewal", "NEWNYM every 10 min — prevents traffic correlation")
 
-        with Spinner("Forcing timezone to UTC"):
-            import timezone_utc
-            timezone_utc.activate()
-        _rb.register("Restore original timezone", timezone_utc.deactivate)
-        ok("System timezone set to UTC — timezone fingerprinting blocked")
+        if SI.is_macos:
+            with Spinner("Checking FileVault / swap encryption"):
+                import swap_check
+                result = swap_check.check()
+            if result["filevault"]:
+                ok(f"FileVault enabled — swap encrypted")
+            else:
+                warn("FileVault is OFF — enable it in System Settings → Privacy & Security → FileVault")
 
-        with Spinner("Checking FileVault / swap encryption"):
-            import swap_check
-            result = swap_check.check()
-        if result["filevault"]:
-            ok(f"FileVault enabled — swap encrypted")
-        else:
-            warn("FileVault is OFF — enable it in System Settings → Privacy & Security → FileVault")
-
-        with Spinner("Checking System Integrity Protection (SIP)"):
-            import sip_check
-            sip_ok = sip_check.check()
-        if sip_ok:
-            ok("SIP enabled — system files protected against local tampering")
-        else:
-            warn("SIP is DISABLED — reboot to Recovery Mode and run: csrutil enable")
+            with Spinner("Checking System Integrity Protection (SIP)"):
+                import sip_check
+                sip_ok = sip_check.check()
+            if sip_ok:
+                ok("SIP enabled — system files protected against local tampering")
+            else:
+                warn("SIP is DISABLED — reboot to Recovery Mode and run: csrutil enable")
 
         _restore_logging(_log_state)
         self_test()
@@ -1184,10 +1217,11 @@ def cmd_install() -> None:
         section("Installation Complete")
         print(f"  {bold(green('HIDE is active and protecting your network.'))}")
         print()
+        _hide_cmd = "python hide.py" if SI.is_windows else "sudo python3 hide.py"
         print(f"  {bold('Quick commands:')}")
-        print(f"    {cyan('python3 hide.py')}         — open this menu")
-        print(f"    {cyan('python3 status.py')}        — live status dashboard")
-        print(f"    {cyan('python3 browser_hardening.py firefox')}  — launch hardened browser")
+        print(f"    {cyan(_hide_cmd)}   — open this menu (Install / Status / Private Browser)")
+        print(f"    {grey('Menu option [4]')}       — live status + self-test")
+        print(f"    {grey('Menu option [5]')}       — launch a hardened browser routed through Tor")
         print()
         show_running_processes()
         print()
@@ -1202,7 +1236,7 @@ def cmd_install() -> None:
         input(f"\n  {grey('Press Enter to return to menu...')}")
 
 def cmd_remove() -> None:
-    _silence_logging()                                                      
+    _silence_logging()
     print_banner()
     print(f"  {bold(red('Removing HIDE...'))} {grey('(all components will be unloaded and deleted)')}")
     print()
@@ -1326,18 +1360,18 @@ def cmd_remove() -> None:
         policy_dirs = []
         if SI.is_macos:
             policy_dirs = [
-                Path.home() / "Library/Application Support/Google/Chrome/policies/managed",
-                Path.home() / "Library/Application Support/Chromium/policies/managed",
-                Path.home() / "Library/Application Support/BraveSoftware/Brave-Browser/policies/managed",
+                USER_HOME / "Library/Application Support/Google/Chrome/policies/managed",
+                USER_HOME / "Library/Application Support/Chromium/policies/managed",
+                USER_HOME / "Library/Application Support/BraveSoftware/Brave-Browser/policies/managed",
             ]
         elif SI.is_linux:
             policy_dirs = [
-                Path.home() / ".config/google-chrome/policies/managed",
-                Path.home() / ".config/chromium/policies/managed",
-                Path.home() / ".config/BraveSoftware/Brave-Browser/policies/managed",
+                USER_HOME / ".config/google-chrome/policies/managed",
+                USER_HOME / ".config/chromium/policies/managed",
+                USER_HOME / ".config/BraveSoftware/Brave-Browser/policies/managed",
             ]
         elif SI.is_windows:
-            local = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+            local = Path(os.environ.get("LOCALAPPDATA", USER_HOME))
             policy_dirs = [
                 local / "Google/Chrome/User Data/policies/managed",
                 local / "Chromium/User Data/policies/managed",
@@ -1346,15 +1380,21 @@ def cmd_remove() -> None:
         for policy_dir in policy_dirs:
             p = policy_dir / "privacy_tool.json"
             p.unlink(missing_ok=True)
+        if SI.is_windows:
+            try:
+                import webrtc_prevention
+                webrtc_prevention.remove_chromium_windows_registry()
+            except Exception:
+                pass
 
     with Spinner("Removing Firefox user.js from profiles"):
         firefox_roots = []
         if SI.is_macos:
-            firefox_roots = [Path.home() / "Library/Application Support/Firefox/Profiles"]
+            firefox_roots = [USER_HOME / "Library/Application Support/Firefox/Profiles"]
         elif SI.is_linux:
-            firefox_roots = [Path.home() / ".mozilla/firefox"]
+            firefox_roots = [USER_HOME / ".mozilla/firefox"]
         elif SI.is_windows:
-            appdata = Path(os.environ.get("APPDATA", Path.home()))
+            appdata = Path(os.environ.get("APPDATA", USER_HOME))
             firefox_roots = [appdata / "Mozilla/Firefox/Profiles"]
         for profile_root in firefox_roots:
             if profile_root.exists():
@@ -1378,6 +1418,263 @@ def cmd_status() -> None:
     print_banner()
     show_running_processes()
     self_test()
+
+def _print_plan(title: str, steps: list[str]) -> None:
+    print_banner(clear=False)
+    section(title)
+    for step in steps:
+        info(step)
+    print()
+    ok("Dry run complete. No changes were made.")
+
+def cmd_dry_run(target: str = "install") -> None:
+    target = target.lower().strip()
+    common = [
+        f"Detected OS: {SI.os_name} ({SI.arch})",
+        f"App support directory: {APP_SUPPORT}",
+        f"User home: {USER_HOME}",
+    ]
+    plans: dict[str, list[str]] = {
+        "install": common + [
+            "Check administrator/root privileges.",
+            "Create or reuse the Python virtual environment.",
+            "Install or locate Tor and obfs4proxy.",
+            "Create the app support directory and service directories.",
+            "Write torrc with SOCKS ports, control port, DNS resolver, and bridge settings.",
+            "Fetch fresh obfs4 bridges, falling back to bundled bridges if needed.",
+            "Record the file integrity manifest.",
+            "Apply browser WebRTC/fingerprinting policies where supported.",
+            "Install background services for the guard, bridge refresh, NTP sync, and log purge.",
+            "Start Tor and wait for bootstrap.",
+            "Activate DNS leak prevention, telemetry blocking, MAC/hostname randomization, "
+            "NTP-over-Tor, timezone UTC, traffic padding, and circuit renewal.",
+            "Run status/self-test at the end.",
+        ],
+        "remove": common + [
+            "Unload HIDE services or scheduled tasks.",
+            "Stop Tor.",
+            "Flush HIDE firewall rules and DNS redirects.",
+            "Remove HIDE hosts-file telemetry block.",
+            "Restore DNS resolver settings.",
+            "Re-enable system NTP.",
+            "Restore the original timezone if a backup exists.",
+            "Securely wipe HIDE log files and remove the app support directory.",
+            "Remove browser policies and Firefox user.js files written by HIDE.",
+        ],
+        "rescue": common + [
+            "Stop HIDE background services where possible.",
+            "Stop Tor.",
+            "Open the firewall and remove HIDE kill-switch rules.",
+            "Restore DNS settings and clear HIDE DNS firewall rules.",
+            "Remove HIDE telemetry entries from the hosts file.",
+            "Re-enable system NTP.",
+            "Restore the original timezone if a backup exists.",
+            "Leave installed files in place so you can inspect or remove them later.",
+        ],
+        "status": common + [
+            "List running HIDE-related processes.",
+            "Check Tor process and SOCKS reachability.",
+            "Read Tor bootstrap status from the log.",
+            "Check firewall/DNS/hosts/integrity/timezone indicators where available.",
+        ],
+        "capabilities": common + [
+            "Report package manager availability.",
+            "Report service/firewall/DNS/browser support for this OS.",
+            "Flag best-effort protections before install.",
+            "Make no changes.",
+        ],
+    }
+    if target not in plans:
+        raise ValueError(f"Unknown dry-run target: {target}")
+    _print_plan(f"Dry Run: {target}", plans[target])
+
+def _capability_rows() -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+
+    def add(name: str, status: str, note: str) -> None:
+        rows.append((name, status, note))
+
+    add("Platform", "ok", SI.os_name)
+    add("Python", "ok", SI.python)
+    add("Tor", "ok" if SI.tor else "missing", SI.tor or "will try to install")
+    add("obfs4proxy", "ok" if SI.obfs4proxy else "missing", SI.obfs4proxy or "will try to install")
+
+    if SI.is_macos:
+        add("Package manager", "ok" if SI.homebrew else "missing", SI.homebrew or "Homebrew will be installed")
+        add("Services", "ok", "launchd daemons and user agents")
+        add("Firewall", "ok", "pf anchors")
+        add("DNS protection", "ok", "pf redirect plus resolver override")
+        add("Browser policies", "ok", "Firefox user.js and Chromium policy JSON")
+        add("MAC randomization", "best-effort", "depends on interface and driver")
+        add("Hostname randomization", "ok", "scutil ComputerName/HostName/LocalHostName")
+        add("Disk/swap checks", "ok", "FileVault and SIP checks available")
+    elif SI.is_linux:
+        from platform_utils import _linux_pkg_manager
+        pkg = _linux_pkg_manager()
+        add("Package manager", "ok" if pkg else "missing", pkg or "manual package install may be needed")
+        add("Services", "ok", "systemd services")
+        add("Firewall", "ok", "iptables/ip6tables rules")
+        add("DNS protection", "best-effort", "iptables redirect plus resolv.conf/systemd-resolved changes")
+        add("Browser policies", "ok", "Firefox user.js and Chromium policy JSON")
+        add("MAC randomization", "best-effort", "requires iproute2 and driver support")
+        add("Hostname randomization", "ok", "hostnamectl")
+        add("Disk/swap checks", "skipped", "macOS-only checks")
+    elif SI.is_windows:
+        from platform_utils import _win_pkg_manager
+        pkg = _win_pkg_manager()
+        add("Package manager", "ok" if pkg else "fallback", pkg or "Tor expert bundle direct download")
+        add("Services", "ok", "Task Scheduler entries")
+        add("Firewall", "ok", "Windows Defender Firewall rules")
+        add("DNS protection", "best-effort", "adapter DNS set to local Tor resolver, restored on remove/rescue")
+        add("Browser policies", "ok", "Firefox user.js and Chromium registry policy")
+        add("MAC randomization", "best-effort", "many drivers ignore NetworkAddress")
+        add("Hostname randomization", "reboot", "Rename-Computer may need restart")
+        add("Disk/swap checks", "skipped", "macOS-only checks")
+    else:
+        add("Platform support", "unsupported", "macOS, Linux, and Windows are supported")
+
+    add(
+        "Detected browsers",
+        "ok" if SI.browsers else "missing",
+        ", ".join(SI.browsers) or "install Firefox, Chrome, Chromium, or Brave",
+    )
+    return rows
+
+def cmd_capabilities() -> None:
+    print_banner(clear=False)
+    section("Capability Report")
+    for name, status, note in _capability_rows():
+        if status == "ok":
+            label = green("ok")
+        elif status in {"best-effort", "fallback", "reboot", "missing", "skipped"}:
+            label = yellow(status)
+        else:
+            label = red(status)
+        print(f"    {bold(name):<24} {label:<20} {grey(note)}")
+    print()
+    info("This report does not change system settings.")
+
+def cmd_help() -> None:
+    print("""HIDE
+
+Usage:
+  python hide.py                       open the menu
+  python hide.py --auto-install        run install without opening the menu
+  python hide.py --rescue              emergency network restore
+  python hide.py --capabilities        show supported protections on this machine
+  python hide.py --dry-run install     show install plan without changing anything
+  python hide.py --dry-run remove      show remove plan without changing anything
+  python hide.py --dry-run rescue      show rescue plan without changing anything
+  python hide.py --dry-run status      show status plan without changing anything
+  python hide.py --dry-run capabilities show capability plan without changing anything
+
+Use python3 instead of python on macOS/Linux if that is how Python is installed.
+""")
+
+def _stop_hide_services_for_rescue() -> None:
+    from platform_utils import IS_MACOS, IS_LINUX, IS_WINDOWS
+    if IS_MACOS:
+        for label in [p.replace(".plist", "") for p in ROOT_PLISTS]:
+            _launchctl_unload(label, system=True)
+        for label in [p.replace(".plist", "") for p in AGENT_PLISTS]:
+            _launchctl_unload(label, system=False)
+    elif IS_LINUX:
+        for name in ["hide-killswitch", "hide-bridge-refresh", "hide-ntp-sync", "hide-log-purge"]:
+            subprocess.run(["sudo", "systemctl", "stop", name], capture_output=True)
+    elif IS_WINDOWS:
+        for name in ["hide-killswitch", "hide-bridge-refresh", "hide-ntp-sync", "hide-log-purge"]:
+            subprocess.run(["schtasks", "/End", "/TN", f"HIDE\\{name}"], capture_output=True)
+
+def _stop_tor_for_rescue() -> None:
+    if SI.is_windows:
+        subprocess.run(["taskkill", "/F", "/IM", "tor.exe"], capture_output=True)
+    else:
+        subprocess.run(["pkill", "-x", "tor"], capture_output=True)
+
+def _reenable_ntp_for_rescue() -> None:
+    if SI.is_macos:
+        subprocess.run(
+            ["sudo", "launchctl", "load", "-w",
+             "/System/Library/LaunchDaemons/com.apple.timed.plist"],
+            capture_output=True,
+        )
+    elif SI.is_linux:
+        subprocess.run(["sudo", "timedatectl", "set-ntp", "true"], capture_output=True)
+        for svc in ["systemd-timesyncd", "ntp", "chrony"]:
+            subprocess.run(["sudo", "systemctl", "start", svc], capture_output=True)
+    elif SI.is_windows:
+        subprocess.run(["sc", "config", "w32tm", "start=auto"], capture_output=True)
+        subprocess.run(["sc", "start", "w32tm"], capture_output=True)
+
+def cmd_rescue() -> None:
+    print_banner(clear=False)
+    print(f"  {bold(yellow('Emergency restore'))} {grey('(network basics only)')}")
+    print()
+    warn("This does not uninstall HIDE. It only tries to get normal networking back.")
+
+    section("Restoring Network")
+    with Spinner("Stopping HIDE background services"):
+        _stop_hide_services_for_rescue()
+
+    with Spinner("Stopping Tor"):
+        _stop_tor_for_rescue()
+
+    with Spinner("Opening firewall and removing kill-switch rules"):
+        try:
+            from platform_utils import firewall_pass
+            firewall_pass()
+        except Exception:
+            pass
+        if SI.is_macos:
+            for anchor in ["com.privacy_tool.killswitch", "com.privacy_tool.dns",
+                           "com.privacy_tool.telemetry", "com.privacy_tool.ntp"]:
+                subprocess.run(["sudo", "pfctl", "-a", anchor, "-F", "all"], capture_output=True)
+        elif SI.is_linux:
+            for cmd in [
+                ["sudo", "iptables", "-D", "OUTPUT", "!", "-o", "lo", "-j", "DROP"],
+                ["sudo", "iptables", "-D", "INPUT", "!", "-i", "lo", "-j", "DROP"],
+                ["sudo", "ip6tables", "-D", "OUTPUT", "-j", "DROP"],
+                ["sudo", "ip6tables", "-D", "INPUT", "-j", "DROP"],
+            ]:
+                subprocess.run(cmd, capture_output=True)
+        elif SI.is_windows:
+            for rule in ["HIDE_block_out", "HIDE_block_in", "HIDE_block_ipv6"]:
+                subprocess.run(
+                    ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule}"],
+                    capture_output=True,
+                )
+
+    with Spinner("Restoring DNS settings"):
+        try:
+            import dns_leak_prevention
+            dns_leak_prevention.deactivate()
+        except Exception:
+            try:
+                from platform_utils import firewall_restore_dns
+                firewall_restore_dns()
+            except Exception:
+                pass
+
+    with Spinner("Removing HIDE hosts-file block"):
+        try:
+            from platform_utils import remove_hosts_block
+            remove_hosts_block()
+        except Exception:
+            pass
+
+    with Spinner("Re-enabling system NTP"):
+        _reenable_ntp_for_rescue()
+
+    with Spinner("Restoring timezone backup"):
+        try:
+            import timezone_utc
+            timezone_utc.deactivate()
+        except Exception:
+            pass
+
+    print()
+    ok("Emergency restore finished.")
+    info("If networking is still broken, reboot once, then run Remove from the HIDE menu.")
 
 _PRIVATE_PROFILE_ROOT = APP_SUPPORT / "private_browser_profiles"
 
@@ -1480,7 +1777,7 @@ def _launch_firefox_private() -> None:
         "--profile", str(profile_dir),
         "--no-remote",
         "--new-instance",
-        "--class", "HIDE-Private",                                                     
+        "--class", "HIDE-Private",
     ])
     ok(f"Firefox private window launched  {grey(f'(profile: {profile_dir.name})')}")
 
@@ -1572,6 +1869,9 @@ MENU_ITEMS = [
     ("3", "Reinstall",      "Remove then perform a clean install",              cmd_reinstall),
     ("4", "Status",         "Show running processes and run self-test",         cmd_status),
     ("5", "Private Browser","Open an isolated browser window routed via Tor",  cmd_private_browser),
+    ("6", "Dry Run",        "Show what install would do without changing anything", lambda: cmd_dry_run("install")),
+    ("7", "Rescue",         "Emergency network restore without uninstalling",    cmd_rescue),
+    ("8", "Capabilities",   "Show supported protections on this machine",        cmd_capabilities),
     ("q", "Quit",           "",                                                 None),
 ]
 
@@ -1592,13 +1892,14 @@ def main_menu() -> None:
             print()
             break
 
-        matched = next((fn for k, _, _, fn in MENU_ITEMS if k == choice), None)
-        if choice == "q" or matched is None:
-            if choice not in {item[0] for item in MENU_ITEMS}:
-                warn(f"Unknown option: {choice!r}")
-                time.sleep(0.8)
-                continue
+        if choice in {"q", "0", "exit", "quit"}:
             break
+
+        matched = next((fn for k, _, _, fn in MENU_ITEMS if k == choice), None)
+        if matched is None:
+            warn(f"Unknown option: {choice!r}")
+            time.sleep(0.8)
+            continue
 
         needs_install = {cmd_remove, cmd_reinstall, cmd_status, cmd_private_browser}
         if matched in needs_install and not APP_SUPPORT.exists():
@@ -1633,17 +1934,16 @@ def _repair_permissions() -> None:
         test = APP_SUPPORT / ".permission_test"
         test.touch()
         test.unlink()
-        return                        
+        return
     except PermissionError:
         pass
 
     if sys.platform == "win32":
         return
-    import pwd as _pwd
-    user = _pwd.getpwuid(os.getuid()).pw_name
+    owner = _owner_spec(SI.uid, SI.gid)
     print(f"  {yellow('!')} Fixing directory permissions (requires password once)...")
     r = subprocess.run(
-        ["sudo", "chown", "-R", f"{user}:staff", str(APP_SUPPORT)],
+        ["sudo", "chown", "-R", owner, str(APP_SUPPORT)],
         capture_output=False,
     )
     if r.returncode == 0:
@@ -1651,18 +1951,53 @@ def _repair_permissions() -> None:
     else:
         print(f"  {red('✗')} Could not fix permissions automatically.")
         print(f"    Run this command manually and try again:")
-        print(f"    {grey(f'sudo chown -R {user}:staff {APP_SUPPORT}')}\n")
+        print(f"    {grey(f'sudo chown -R {owner} {APP_SUPPORT}')}\n")
         sys.exit(1)
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, lambda *_: (print(), sys.exit(0)))
 
-    _repair_permissions()
-
     auto = "--auto-install" in sys.argv
+    rescue = "--rescue" in sys.argv or "rescue" in sys.argv
+    dry_run = "--dry-run" in sys.argv
+    capabilities = "--capabilities" in sys.argv or "capabilities" in sys.argv
+    help_requested = "--help" in sys.argv or "-h" in sys.argv or "help" in sys.argv
+
+    def _dry_run_target() -> str:
+        for marker in ("--dry-run", "dry-run"):
+            if marker in sys.argv:
+                idx = sys.argv.index(marker)
+                if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-"):
+                    return sys.argv[idx + 1]
+        return "install"
+
+    if help_requested:
+        cmd_help()
+        sys.exit(0)
+
+    if not dry_run and not capabilities:
+        _repair_permissions()
+
+    if dry_run:
+        try:
+            cmd_dry_run(_dry_run_target())
+        except Exception as exc:
+            err(str(exc))
+            sys.exit(1)
+        sys.exit(0)
+
+    if capabilities:
+        cmd_capabilities()
+        sys.exit(0)
 
     with InstanceLock("hide"):
-        if auto:
+        if rescue:
+            try:
+                cmd_rescue()
+            except Exception as exc:
+                err(f"Rescue failed: {exc}")
+                sys.exit(1)
+        elif auto:
             try:
                 cmd_install()
             except Exception as exc:

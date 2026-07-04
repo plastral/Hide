@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import random
@@ -8,6 +8,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
+import _path
 from config_loader import CFG
 
 log = logging.getLogger(__name__)

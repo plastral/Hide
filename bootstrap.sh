@@ -21,7 +21,7 @@ banner() {
     echo '  ██║  ██║██║██████╔╝███████╗'
     echo '  ╚═╝  ╚═╝╚═╝╚═════╝ ╚══════╝'
     echo -e "${R}"
-    echo -e "  ${W}made by plantiral with love${R}"
+    echo -e "  ${W}made by plastral${R}"
     echo -e "  ──────────────────────────────────────────────"
     echo
 }

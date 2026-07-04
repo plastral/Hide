@@ -10,7 +10,7 @@ function Write-Banner {
     Write-Host "  H I D E  -  Privacy Tool" -ForegroundColor White
     Write-Host "  ==============================================" -ForegroundColor White
     Write-Host ""
-    Write-Host "  made by plantiral with love" -ForegroundColor DarkGray
+    Write-Host "  made by plastral" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -92,9 +92,18 @@ function Ensure-Python {
 function Start-Hide {
     param($PythonPath)
     Write-Step "Launching HIDE"
-    Write-Info "Starting installer..."
+    Write-Info "Opening the HIDE menu in this window..."
     Write-Host ""
-    & $PythonPath "$ToolDir\hide.py"
+    try {
+        & $PythonPath "$ToolDir\hide.py"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "HIDE exited with code $LASTEXITCODE."
+        }
+    } catch {
+        Write-Fail "Could not launch HIDE: $($_.Exception.Message)"
+    }
+    Write-Host ""
+    Read-Host "Press Enter to close this window"
 }
 
 Write-Banner

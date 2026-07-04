@@ -1,10 +1,10 @@
-                      
+
 
 import logging
 import subprocess
 from pathlib import Path
 
-import _path              
+import _path
 
 log = logging.getLogger(__name__)
 

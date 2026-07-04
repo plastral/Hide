@@ -1,4 +1,4 @@
-                      
+
 
 import os
 import platform
@@ -15,6 +15,35 @@ _sys = platform.system().lower()
 IS_MACOS   = _sys == "darwin"
 IS_LINUX   = _sys == "linux"
 IS_WINDOWS = _sys == "windows"
+
+def is_admin() -> bool:
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+def user_home() -> Path:
+    if IS_WINDOWS:
+        return Path.home()
+    sudo_uid = os.environ.get("SUDO_UID")
+    if sudo_uid:
+        try:
+            import pwd
+            return Path(pwd.getpwuid(int(sudo_uid)).pw_dir)
+        except (ImportError, KeyError, ValueError):
+            pass
+    return Path.home()
+
+def real_uid_gid() -> tuple[int, int]:
+    if IS_WINDOWS:
+        return (0, 0)
+    return (
+        int(os.environ.get("SUDO_UID", os.getuid())),
+        int(os.environ.get("SUDO_GID", os.getgid())),
+    )
 
 def os_name() -> str:
     if IS_MACOS:   return "macOS"
@@ -81,7 +110,16 @@ def install_package(package: str, binary: str) -> str:
     return path
 
 def _brew_install(package: str) -> None:
-    brew = shutil.which("brew") or "/opt/homebrew/bin/brew" or "/usr/local/bin/brew"
+    brew = shutil.which("brew")
+    if not brew:
+        for candidate in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+            if os.path.isfile(candidate):
+                brew = candidate
+                break
+    if not brew:
+        raise RuntimeError(
+            "Homebrew not found. Install it from https://brew.sh and try again."
+        )
     subprocess.run([brew, "install", package], check=True, capture_output=True)
 
 _LINUX_OBFS4_URL = "https://github.com/yawning/obfs4/releases/download/obfs4proxy-0.0.14/obfs4proxy_linux_amd64"
@@ -121,7 +159,10 @@ def _win_localappdata() -> str:
     return v
 
 _WIN_TOR_DIR = Path(_win_localappdata()) / "HIDE" / "tor" if IS_WINDOWS else Path("/tmp/hide_tor")
-_WIN_TOR_URL = "https://archive.torproject.org/tor-package-archive/torbrowser/14.5.1/tor-expert-bundle-windows-x86_64-14.5.1.tar.gz"
+_WIN_TOR_URL = (
+    "https://archive.torproject.org/tor-package-archive/torbrowser/14.5.1/"
+    "tor-expert-bundle-windows-x86_64-14.5.1.tar.gz"
+)
 
 def _windows_install(package: str, binary: str) -> None:
     if package == "tor":
@@ -137,7 +178,10 @@ def _find_win_pt_binary() -> Path | None:
     return None
 
 def _windows_download_tor() -> None:
-    import tarfile, urllib.request, tempfile, sys as _sys
+    import socket as _socket, tarfile, urllib.request, tempfile, sys as _sys
+    # urlretrieve has no timeout parameter; without a default socket timeout a
+    # stalled connection would hang the whole installer indefinitely.
+    _socket.setdefaulttimeout(60)
     _WIN_TOR_DIR.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mktemp(suffix=".tar.gz"))
 
@@ -152,7 +196,16 @@ def _windows_download_tor() -> None:
             _sys.stdout.write(f"\r    Downloading Tor... {pct:>3}%  [{bar}]  ")
             _sys.stdout.flush()
 
-    urllib.request.urlretrieve(_WIN_TOR_URL, tmp, reporthook=_progress)
+    try:
+        urllib.request.urlretrieve(_WIN_TOR_URL, tmp, reporthook=_progress)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Failed to download the Tor Expert Bundle from {_WIN_TOR_URL}: {exc}. "
+            "Check your internet connection and try again."
+        ) from exc
+    finally:
+        _socket.setdefaulttimeout(None)
     _sys.stdout.write("\r    Extracting...                                    \n")
     _sys.stdout.flush()
 
@@ -197,25 +250,91 @@ def firewall_block_dns() -> None:
     elif IS_WINDOWS:
         _windows_dns_redirect()
 
-_PF_BLOCK = 'anchor "com.privacy_tool.killswitch" {\n  block drop out quick on ! lo0 all\n  block drop in  quick on ! lo0 all\n  pass on lo0 all\n}'
-_PF_PASS  = 'anchor "com.privacy_tool.killswitch" {\n  pass all\n}'
-_PF_DNS   = '''anchor "com.privacy_tool.dns" {
-  rdr pass proto udp from any to !127.0.0.1 port 53 -> 127.0.0.1 port 5300
-  rdr pass proto tcp from any to !127.0.0.1 port 53 -> 127.0.0.1 port 5300
-  block drop quick inet6 all
-  block drop quick proto udp from any to any port 53
-}'''
+def firewall_restore_dns() -> None:
+    """Undo the DNS redirect/hijack. Safe to call when nothing was applied."""
+    if IS_MACOS:
+        macos_pf_flush_anchor("com.privacy_tool.dns")
+    elif IS_LINUX:
+        subprocess.run(["sudo", "iptables", "-t", "nat", "-D", "OUTPUT", "-p", "udp",
+                        "--dport", "53", "-j", "REDIRECT", "--to-ports", "5300"],
+                       capture_output=True)
+        subprocess.run(["sudo", "iptables", "-t", "nat", "-D", "OUTPUT", "-p", "tcp",
+                        "--dport", "53", "-j", "REDIRECT", "--to-ports", "5300"],
+                       capture_output=True)
+        _linux_restore_resolv_conf()
+    elif IS_WINDOWS:
+        _windows_restore_dns()
+
+_PF_HIDE_BASE = """\
+scrub-anchor "com.apple/*"
+nat-anchor "com.apple/*"
+rdr-anchor "com.apple/*"
+dummynet-anchor "com.apple/*"
+anchor "com.apple/*"
+load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+
+rdr-anchor "com.privacy_tool.dns"
+anchor "com.privacy_tool.killswitch"
+anchor "com.privacy_tool.dns"
+anchor "com.privacy_tool.telemetry"
+anchor "com.privacy_tool.ntp"
+"""
+
+_PF_BLOCK = """\
+block drop out quick on ! lo0 all
+block drop in  quick on ! lo0 all
+pass on lo0 all
+"""
+_PF_PASS = "pass all\n"
+_PF_DNS = """\
+rdr pass proto udp from any to !127.0.0.1 port 53 -> 127.0.0.1 port 5300
+rdr pass proto tcp from any to !127.0.0.1 port 53 -> 127.0.0.1 port 5300
+block drop quick inet6 all
+block drop quick proto udp from any to any port 53
+"""
+
+def _macos_pf_base_loaded() -> bool:
+    rules = subprocess.run(["pfctl", "-sr"], capture_output=True, text=True)
+    nat = subprocess.run(["pfctl", "-sn"], capture_output=True, text=True)
+    required_rules = [
+        'anchor "com.privacy_tool.killswitch"',
+        'anchor "com.privacy_tool.dns"',
+        'anchor "com.privacy_tool.telemetry"',
+        'anchor "com.privacy_tool.ntp"',
+    ]
+    return (
+        rules.returncode == 0
+        and nat.returncode == 0
+        and all(anchor in rules.stdout for anchor in required_rules)
+        and 'rdr-anchor "com.privacy_tool.dns"' in nat.stdout
+    )
+
+def _macos_pf_ensure_base() -> None:
+    if not _macos_pf_base_loaded():
+        subprocess.run(["pfctl", "-f", "-"], input=_PF_HIDE_BASE, text=True, capture_output=True)
+
+def macos_pf_load_anchor(anchor: str, rules: str) -> subprocess.CompletedProcess:
+    _macos_pf_ensure_base()
+    proc = subprocess.run(
+        ["pfctl", "-a", anchor, "-f", "-"],
+        input=rules,
+        text=True,
+        capture_output=True,
+    )
+    subprocess.run(["pfctl", "-e"], capture_output=True)
+    return proc
+
+def macos_pf_flush_anchor(anchor: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["pfctl", "-a", anchor, "-F", "all"], capture_output=True)
 
 def _macos_pf_block():
-    subprocess.run(["pfctl", "-f", "-"], input=_PF_BLOCK, text=True, capture_output=True)
-    subprocess.run(["pfctl", "-e"], capture_output=True)
+    macos_pf_load_anchor("com.privacy_tool.killswitch", _PF_BLOCK)
 
 def _macos_pf_pass():
-    subprocess.run(["pfctl", "-a", "com.privacy_tool.killswitch", "-F", "rules"], capture_output=True)
+    macos_pf_load_anchor("com.privacy_tool.killswitch", _PF_PASS)
 
 def _macos_pf_dns():
-    subprocess.run(["pfctl", "-f", "-"], input=_PF_DNS, text=True, capture_output=True)
-    subprocess.run(["pfctl", "-e"], capture_output=True)
+    macos_pf_load_anchor("com.privacy_tool.dns", _PF_DNS)
 
 def _linux_persist_iptables() -> None:
     iptables_dir = Path("/etc/iptables")
@@ -358,6 +477,14 @@ def _windows_fw_pass():
         )
     _reenable_ipv6_windows()
 
+def _parse_connected_interfaces(netsh_output: str) -> list[str]:
+    adapters: list[str] = []
+    for line in netsh_output.splitlines():
+        parts = line.split()
+        if len(parts) >= 4 and parts[1] == "Connected":
+            adapters.append(" ".join(parts[3:]))
+    return adapters
+
 def _windows_dns_redirect():
     adapters_file = app_support_dir() / "original_dns_adapters.txt"
     app_support_dir().mkdir(parents=True, exist_ok=True)
@@ -366,11 +493,7 @@ def _windows_dns_redirect():
         ["netsh", "interface", "show", "interface"],
         capture_output=True, text=True,
     )
-    connected_adapters = [
-        parts[-1]
-        for line in result.stdout.splitlines()
-        if (parts := line.split()) and len(parts) >= 4 and parts[2] == "Connected"
-    ]
+    connected_adapters = _parse_connected_interfaces(result.stdout)
 
     adapters_file.write_text("\n".join(connected_adapters), encoding="utf-8")
 
@@ -381,12 +504,13 @@ def _windows_dns_redirect():
             capture_output=True,
         )
 
-    subprocess.run(
-        ["netsh", "advfirewall", "firewall", "add", "rule",
-         "name=HIDE_block_dns", "dir=out", "action=block",
-         "protocol=UDP", "localport=53"],
-        capture_output=True,
-    )
+    for proto in ("UDP", "TCP"):
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "add", "rule",
+             f"name=HIDE_block_dns_{proto.lower()}", "dir=out", "action=block",
+             f"protocol={proto}", "remoteport=53"],
+            capture_output=True,
+        )
 
 def _windows_restore_dns():
     adapters_file = app_support_dir() / "original_dns_adapters.txt"
@@ -404,10 +528,11 @@ def _windows_restore_dns():
             )
         adapters_file.unlink(missing_ok=True)
 
-    subprocess.run(
-        ["netsh", "advfirewall", "firewall", "delete", "rule", "name=HIDE_block_dns"],
-        capture_output=True,
-    )
+    for rule in ("HIDE_block_dns", "HIDE_block_dns_udp", "HIDE_block_dns_tcp"):
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule}"],
+            capture_output=True,
+        )
 
 TOOL_DIR = Path(__file__).parent
 
@@ -433,8 +558,7 @@ def _macos_plist_path(name: str) -> Path:
 def _macos_install_service(name: str, python_path: str, script_path: str) -> None:
     app_support = app_support_dir()
     app_support.mkdir(parents=True, exist_ok=True)
-    uid = os.getuid()
-    gid = os.getgid()
+    uid, gid = real_uid_gid()
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -450,7 +574,7 @@ def _macos_install_service(name: str, python_path: str, script_path: str) -> Non
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>HOME</key><string>{Path.home()}</string>
+    <key>HOME</key><string>{user_home()}</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>SUDO_UID</key><string>{uid}</string>
     <key>SUDO_GID</key><string>{gid}</string>
@@ -485,7 +609,7 @@ def _linux_service_path(name: str) -> Path:
     return Path(f"/etc/systemd/system/{name}.service")
 
 def _linux_install_service(name: str, description: str, python_path: str, script_path: str) -> None:
-    app_dir = Path.home() / ".local" / "share" / "privacy_tool"
+    app_dir = app_support_dir()
     app_dir.mkdir(parents=True, exist_ok=True)
     unit = f"""[Unit]
 Description={description}
@@ -497,7 +621,7 @@ Type=simple
 ExecStart={python_path} {script_path}
 Restart=always
 RestartSec=10
-Environment=HOME={Path.home()}
+Environment=HOME={user_home()}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 StandardOutput=append:{app_dir}/{name}.log
 StandardError=append:{app_dir}/{name}.log
@@ -520,12 +644,16 @@ def _linux_remove_service(name: str) -> None:
     subprocess.run(["sudo", "systemctl", "daemon-reload"], capture_output=True)
 
 def _windows_install_service(name: str, description: str, python_path: str, script_path: str) -> None:
-    cmd = (
-        f'schtasks /Create /TN "HIDE\\{name}" /TR '
-        f'"{python_path} {script_path}" /SC ONSTART /RU SYSTEM /F'
+    # Both paths routinely contain spaces (e.g. C:\Users\Jane Doe\...), so the
+    # program and its argument each need their own quoting inside /TR. schtasks
+    # requires the inner double-quotes to be escaped as \" within the /TR value.
+    tr_value = f'\\"{python_path}\\" \\"{script_path}\\"'
+    subprocess.run(
+        ["schtasks", "/Create", "/TN", f"HIDE\\{name}", "/TR", tr_value,
+         "/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F"],
+        capture_output=True, text=True,
     )
-    subprocess.run(cmd, shell=True, capture_output=True)
-    subprocess.run(f'schtasks /Run /TN "HIDE\\{name}"', shell=True, capture_output=True)
+    subprocess.run(["schtasks", "/Run", "/TN", f"HIDE\\{name}"], capture_output=True)
 
 def _windows_remove_service(name: str) -> None:
     subprocess.run(f'schtasks /Delete /TN "HIDE\\{name}" /F', shell=True, capture_output=True)
@@ -595,10 +723,7 @@ def get_active_interfaces() -> list[str]:
             ["netsh", "interface", "show", "interface"],
             capture_output=True, text=True,
         )
-        return [
-            parts[-1] for line in r.stdout.splitlines()
-            if (parts := line.split()) and len(parts) >= 4 and parts[2] == "Connected"
-        ]
+        return _parse_connected_interfaces(r.stdout)
     return []
 
 def randomize_hostname() -> str:
@@ -615,9 +740,11 @@ def randomize_hostname() -> str:
         Path("/etc/hostname").write_text(name + "\n") if os.geteuid() == 0 else \
             subprocess.run(["sudo", "sh", "-c", f"echo {name} > /etc/hostname"], capture_output=True)
     elif IS_WINDOWS:
+        # wmic was removed in recent Windows 11 builds; Rename-Computer is the
+        # supported path. The new name takes effect after the next reboot.
         subprocess.run(
-            ["wmic", "computersystem", "where", "name='%COMPUTERNAME%'",
-             "call", "rename", f"name={name}"],
+            ["powershell", "-NoProfile", "-Command",
+             f"Rename-Computer -NewName '{name}' -Force"],
             capture_output=True,
         )
     return name
@@ -641,8 +768,8 @@ def disable_system_ntp() -> None:
 
 def block_ntp_port() -> None:
     if IS_MACOS:
-        rules = 'anchor "com.privacy_tool.ntp" {\n  block drop quick proto udp from any to any port 123\n}'
-        subprocess.run(["pfctl", "-f", "-"], input=rules, text=True, capture_output=True)
+        rules = "block drop quick proto udp from any to any port 123\n"
+        macos_pf_load_anchor("com.privacy_tool.ntp", rules)
     elif IS_LINUX:
         subprocess.run(["sudo", "iptables", "-I", "OUTPUT", "1", "-p", "udp",
                         "--dport", "123", "-j", "DROP"], capture_output=True)
@@ -714,10 +841,10 @@ def remove_hosts_block() -> None:
 
 def app_support_dir() -> Path:
     if IS_MACOS:
-        return Path.home() / "Library" / "Application Support" / "privacy_tool"
+        return user_home() / "Library" / "Application Support" / "privacy_tool"
     elif IS_LINUX:
         return Path(os.environ.get("XDG_DATA_HOME",
-                    Path.home() / ".local" / "share")) / "privacy_tool"
+                    user_home() / ".local" / "share")) / "privacy_tool"
     elif IS_WINDOWS:
         localappdata = os.environ.get("LOCALAPPDATA", "")
         if not localappdata:

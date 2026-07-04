@@ -1,11 +1,11 @@
-                      
+
 
 import logging
 import threading
 import time
 from pathlib import Path
 
-import _path              
+import _path
 from config_loader import CFG
 
 log = logging.getLogger(__name__)

@@ -1,4 +1,4 @@
-                      
+
 
 import json
 import logging
@@ -7,7 +7,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_CONFIG_PATH = Path(__file__).parent.parent / "config.json"                    
+_CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 _DEFAULTS: dict[str, Any] = {
     "tor": {

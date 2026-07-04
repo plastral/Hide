@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -7,7 +7,14 @@ import sys
 from pathlib import Path
 
 import _path
-from platform_utils import apply_hosts_block, remove_hosts_block, IS_MACOS
+from platform_utils import (
+    IS_MACOS,
+    apply_hosts_block,
+    macos_pf_flush_anchor,
+    macos_pf_load_anchor,
+    remove_hosts_block,
+    is_admin,
+)
 
 log = logging.getLogger(__name__)
 
@@ -70,54 +77,41 @@ TELEMETRY_DOMAINS: list[str] = [
 ]
 
 TELEMETRY_CIDRS: list[str] = [
-    "17.249.0.0/16",                                
-    "17.250.0.0/16",                    
-    "17.188.0.0/16",                                         
+    "17.249.0.0/16",
+    "17.250.0.0/16",
+    "17.188.0.0/16",
 ]
 
-PF_TELEMETRY_RULES = f"""
-anchor "{PF_ANCHOR}" {{
-""" + "\n".join(
+PF_TELEMETRY_RULES = "\n".join(
     f'  block drop out quick proto {{tcp udp}} from any to {cidr}'
     for cidr in TELEMETRY_CIDRS
-) + """
-}
-"""
+) + "\n"
 
 def apply_pf_block() -> None:
     if not IS_MACOS:
         return
-    proc = subprocess.run(
-        ["pfctl", "-f", "-"],
-        input=PF_TELEMETRY_RULES,
-        text=True,
-        capture_output=True,
-    )
+    proc = macos_pf_load_anchor(PF_ANCHOR, PF_TELEMETRY_RULES)
     if proc.returncode != 0:
         log.error("pfctl telemetry anchor error: %s", proc.stderr.strip())
-    subprocess.run(["pfctl", "-e"], capture_output=True)
     log.info("Telemetry pfctl anchor loaded (%d CIDRs).", len(TELEMETRY_CIDRS))
 
 def remove_pf_block() -> None:
     if not IS_MACOS:
         return
-    subprocess.run(
-        ["pfctl", "-a", PF_ANCHOR, "-F", "all"],
-        capture_output=True,
-    )
+    macos_pf_flush_anchor(PF_ANCHOR)
     log.info("Telemetry pfctl anchor removed.")
 
 def activate() -> None:
-    if os.geteuid() != 0:
-        log.error("telemetry_block.activate() requires root.")
+    if not is_admin():
+        log.error("telemetry_block.activate() requires elevated privileges.")
         return
     apply_hosts_block(TELEMETRY_DOMAINS)
     apply_pf_block()
     log.info("Telemetry blocking active.")
 
 def deactivate() -> None:
-    if os.geteuid() != 0:
-        log.error("telemetry_block.deactivate() requires root.")
+    if not is_admin():
+        log.error("telemetry_block.deactivate() requires elevated privileges.")
         return
     remove_hosts_block()
     remove_pf_block()
@@ -125,6 +119,9 @@ def deactivate() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    if os.geteuid() != 0:
+    if not is_admin():
+        if sys.platform == "win32":
+            log.error("Please run from an Administrator shell.")
+            sys.exit(1)
         os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
     activate()

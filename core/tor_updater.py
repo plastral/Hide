@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -6,6 +6,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+import _path
+from platform_utils import IS_MACOS, real_uid_gid
 
 log = logging.getLogger(__name__)
 
@@ -41,10 +44,12 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", v))
 
 def check_and_upgrade(uid: int | None = None, gid: int | None = None) -> bool:
-    if sys.platform == "win32":
+    if not IS_MACOS:
+        log.info("Tor Homebrew update check skipped on this platform.")
         return True
-    real_uid = uid if uid is not None else os.getuid()
-    real_gid = gid if gid is not None else os.getgid()
+    detected_uid, detected_gid = real_uid_gid()
+    real_uid = uid if uid is not None else detected_uid
+    real_gid = gid if gid is not None else detected_gid
 
     installed = installed_tor_version(real_uid, real_gid)
     if installed is None:
@@ -54,7 +59,7 @@ def check_and_upgrade(uid: int | None = None, gid: int | None = None) -> bool:
     latest = latest_tor_version(real_uid, real_gid)
     if latest is None:
         log.warning("Could not determine latest Tor version — skipping update check.")
-        return True                                             
+        return True
 
     log.info("Tor installed: %s  latest: %s", installed, latest)
 
@@ -76,7 +81,6 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    uid = int(os.environ.get("SUDO_UID", os.getuid()))
-    gid = int(os.environ.get("SUDO_GID", os.getgid()))
+    uid, gid = real_uid_gid()
     ok = check_and_upgrade(uid, gid)
     sys.exit(0 if ok else 1)

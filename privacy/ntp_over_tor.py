@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import _path
-from platform_utils import disable_system_ntp, block_ntp_port
+from platform_utils import disable_system_ntp, block_ntp_port, is_admin
 
 log = logging.getLogger(__name__)
 
@@ -86,8 +86,8 @@ def sync_time() -> bool:
     return True
 
 def activate() -> None:
-    if os.geteuid() != 0:
-        log.error("ntp_over_tor.activate() requires root.")
+    if not is_admin():
+        log.error("ntp_over_tor.activate() requires elevated privileges.")
         return
     disable_system_ntp()
     block_ntp_port()
@@ -96,6 +96,9 @@ def activate() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    if os.geteuid() != 0:
+    if not is_admin():
+        if sys.platform == "win32":
+            log.error("Please run from an Administrator shell.")
+            sys.exit(1)
         os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
     activate()

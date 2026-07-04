@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import _path
-from platform_utils import firewall_block_dns, IS_MACOS
+from platform_utils import firewall_block_dns, firewall_restore_dns, IS_MACOS, is_admin
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ def _flush_dns_cache() -> None:
         subprocess.run(["killall", "-HUP", "mDNSResponder"], capture_output=True)
 
 def activate() -> None:
-    if os.geteuid() != 0:
-        log.error("DNS leak prevention requires root access — please run with sudo.")
+    if not is_admin():
+        log.error("DNS leak prevention requires elevated privileges.")
         return
     firewall_block_dns()
     if IS_MACOS:
@@ -40,16 +40,20 @@ def activate() -> None:
     log.info("DNS and STUN leak prevention is now active.")
 
 def deactivate() -> None:
-    if os.geteuid() != 0:
-        log.error("DNS leak prevention requires root access — please run with sudo.")
+    if not is_admin():
+        log.error("DNS leak prevention requires elevated privileges.")
         return
     if IS_MACOS:
         _remove_resolver_override()
+    firewall_restore_dns()
     _flush_dns_cache()
     log.info("DNS leak prevention has been deactivated.")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    if os.geteuid() != 0:
+    if not is_admin():
+        if sys.platform == "win32":
+            log.error("Please run from an Administrator shell.")
+            sys.exit(1)
         os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
     activate()

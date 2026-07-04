@@ -1,4 +1,4 @@
-                      
+
 
 import logging
 import os
@@ -53,7 +53,7 @@ def _line_age_hours(line: str, now: float) -> float | None:
         candidate = datetime.datetime(today.year, today.month, today.day, h, mi, s)
         age = (now - candidate.timestamp()) / 3600
         if age < 0:
-            age += 24                          
+            age += 24
         return age
     return None
 
